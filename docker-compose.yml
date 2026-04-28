@@ -1,0 +1,35 @@
+services:
+
+  backend:
+    build:
+      context: ./backend
+    container_name: netsentinel-backend
+    ports:
+      - "8765:8765"
+    # network_mode: host  # Descomentar para captura real de paquetes
+    cap_add:
+      - NET_RAW           # Permiso para captura de paquetes
+      - NET_ADMIN
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: netsentinel-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    name: netsentinel-net

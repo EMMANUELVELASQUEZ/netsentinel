@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NetSentinel — Network Packet Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700;900&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg0:    #020508;
+  --bg1:    #060c12;
+  --bg2:    #0a1520;
+  --bg3:    #0f1e2e;
+  --bg4:    #142338;
+  --line:   #0e2035;
+  --line2:  #163050;
+  --acc:    #00c8ff;
+  --acc2:   #0080cc;
+  --acc3:   #004f88;
+  --green:  #00ff88;
+  --green2: #00cc60;
+  --amber:  #ffb800;
+  --red:    #ff3b3b;
+  --red2:   #cc1a1a;
+  --purple: #8855ff;
+  --teal:   #00d4aa;
+  --text0:  #e8f4ff;
+  --text1:  #7aa8cc;
+  --text2:  #3a6888;
+  --text3:  #1e4060;
+  --mono:   'Share Tech Mono', monospace;
+  --sans:   'Exo 2', sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg0);
+  color: var(--text0);
+  font-family: var(--sans);
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── SCANLINE OVERLAY ────────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,200,255,0.015) 2px, rgba(0,200,255,0.015) 4px
+  );
+}
+
+/* ── LAYOUT ──────────────────────────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-rows: 52px 44px 1fr 200px 28px;
+  grid-template-columns: 1fr 320px;
+  height: 100vh;
+  gap: 0;
+}
+
+/* ── HEADER ──────────────────────────────────────────────────────────── */
+header {
+  grid-column: 1 / -1;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--line2);
+  display: flex; align-items: center;
+  padding: 0 20px;
+  gap: 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+header::after {
+  content: '';
+  position: absolute; left: 0; bottom: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--acc), transparent);
+  animation: scanH 4s linear infinite;
+}
+@keyframes scanH { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+
+.logo-hex {
+  width: 36px; height: 36px;
+  position: relative; flex-shrink: 0;
+}
+.logo-hex svg { width: 100%; height: 100%; }
+
+.brand { display: flex; flex-direction: column; gap: 1px; }
+.brand-name {
+  font-family: var(--sans);
+  font-size: 18px; font-weight: 900;
+  letter-spacing: 4px; text-transform: uppercase;
+  color: var(--acc);
+  text-shadow: 0 0 20px rgba(0,200,255,0.4);
+}
+.brand-sub {
+  font-family: var(--mono);
+  font-size: 9px; color: var(--text2);
+  letter-spacing: 3px; text-transform: uppercase;
+}
+
+.h-pills { display: flex; gap: 8px; margin-left: 24px; }
+.pill {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--bg2); border: 1px solid var(--line2);
+  border-radius: 3px; padding: 4px 10px;
+  font-family: var(--mono); font-size: 10px; color: var(--text2);
+}
+.pill b { color: var(--acc); font-weight: 400; }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.dot-live { background: var(--green); animation: pulse 1.8s infinite; }
+.dot-warn { background: var(--amber); animation: pulse 0.7s infinite; }
+.dot-off  { background: var(--text3); }
+.dot-crit { background: var(--red); animation: pulse 0.4s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+.h-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+.threat-badge {
+  display: none; align-items: center; gap: 6px;
+  background: rgba(255,59,59,0.12); border: 1px solid rgba(255,59,59,0.4);
+  border-radius: 3px; padding: 4px 12px;
+  font-family: var(--mono); font-size: 11px; color: var(--red);
+  animation: threat-glow 1s infinite alternate;
+}
+.threat-badge.visible { display: flex; }
+@keyframes threat-glow { from{box-shadow:none} to{box-shadow:0 0 12px rgba(255,59,59,0.3)} }
+
+/* ── TOOLBAR ─────────────────────────────────────────────────────────── */
+.toolbar {
+  grid-column: 1 / -1;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center;
+  padding: 0 16px; gap: 8px;
+}
+
+.tb-btn {
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  padding: 5px 14px;
+  background: var(--bg2); border: 1px solid var(--line2);
+  color: var(--text1); cursor: pointer; border-radius: 2px;
+  display: flex; align-items: center; gap: 6px;
+  transition: all 0.15s; white-space: nowrap;
+}
+.tb-btn:hover { background: var(--bg3); border-color: var(--acc3); color: var(--acc); }
+.tb-btn.active { background: var(--acc3); border-color: var(--acc2); color: var(--acc); }
+.tb-btn.stop   { border-color: rgba(255,59,59,0.4); color: var(--red); }
+.tb-btn.stop:hover { background: rgba(255,59,59,0.1); }
+
+.tb-sep { width: 1px; height: 22px; background: var(--line2); }
+
+.tb-select {
+  font-family: var(--mono); font-size: 11px;
+  background: var(--bg2); border: 1px solid var(--line2);
+  color: var(--text1); padding: 4px 8px; border-radius: 2px;
+  outline: none; cursor: pointer;
+}
+.tb-select:focus { border-color: var(--acc3); }
+
+.filter-wrap { display: flex; align-items: center; gap: 0; flex: 1; max-width: 360px; }
+.filter-label {
+  font-family: var(--mono); font-size: 10px; color: var(--text2);
+  background: var(--bg2); border: 1px solid var(--line2);
+  border-right: none; padding: 5px 8px; border-radius: 2px 0 0 2px;
+  letter-spacing: 1px; white-space: nowrap;
+}
+.filter-input {
+  font-family: var(--mono); font-size: 11px;
+  background: var(--bg1); border: 1px solid var(--line2);
+  color: var(--acc); padding: 5px 10px;
+  border-radius: 0 2px 2px 0; outline: none; flex: 1;
+}
+.filter-input:focus { border-color: var(--acc3); }
+.filter-input::placeholder { color: var(--text3); }
+
+/* ── PACKET TABLE ────────────────────────────────────────────────────── */
+.pkt-panel {
+  grid-row: 3; grid-column: 1;
+  overflow: hidden; display: flex; flex-direction: column;
+  border-right: 1px solid var(--line);
+}
+
+.pkt-table-wrap {
+  overflow-y: auto; flex: 1;
+  scrollbar-width: thin; scrollbar-color: var(--acc3) transparent;
+}
+
+table.pkt {
+  width: 100%; border-collapse: collapse;
+  font-family: var(--mono); font-size: 11px;
+}
+
+table.pkt thead {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--bg2); border-bottom: 1px solid var(--line2);
+}
+
+table.pkt th {
+  padding: 7px 10px; text-align: left;
+  color: var(--text2); font-size: 9px; font-weight: 400;
+  letter-spacing: 2px; text-transform: uppercase;
+  border-right: 1px solid var(--line);
+  cursor: pointer; white-space: nowrap;
+}
+table.pkt th:hover { color: var(--acc); }
+table.pkt th.sort-asc::after { content: ' ↑'; color: var(--acc); }
+table.pkt th.sort-desc::after { content: ' ↓'; color: var(--acc); }
+
+table.pkt td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid rgba(14,32,53,0.5);
+  color: var(--text1); font-size: 11px;
+  max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+table.pkt tr { cursor: pointer; }
+table.pkt tr:hover td { background: var(--bg3); }
+table.pkt tr.selected td { background: var(--bg4) !important; border-bottom-color: var(--acc3); }
+table.pkt tr.alert-row td { background: rgba(255,59,59,0.06); }
+table.pkt tr.alert-row:hover td { background: rgba(255,59,59,0.12); }
+
+.col-no   { width: 46px; color: var(--text3) !important; }
+.col-time { width: 100px; color: var(--teal) !important; }
+.col-src  { width: 160px; color: var(--text0) !important; }
+.col-dst  { width: 160px; color: var(--text0) !important; }
+.col-proto{ width: 72px; }
+.col-len  { width: 55px; text-align: right !important; color: var(--text2) !important; }
+.col-info { color: var(--text1) !important; }
+
+.proto-badge {
+  display: inline-block; padding: 1px 6px;
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  border-radius: 2px; border: 1px solid;
+}
+.TCP   { background: rgba(0,128,204,0.15); color: #4ab4f0; border-color: rgba(0,128,204,0.4); }
+.UDP   { background: rgba(0,212,90,0.12);  color: #30e070; border-color: rgba(0,212,90,0.3); }
+.HTTP  { background: rgba(0,212,170,0.12); color: #00d4aa; border-color: rgba(0,212,170,0.3); }
+.HTTPS { background: rgba(0,255,136,0.1);  color: #00cc60; border-color: rgba(0,255,136,0.3); }
+.DNS   { background: rgba(136,85,255,0.15);color: #aa80ff; border-color: rgba(136,85,255,0.4); }
+.ICMP  { background: rgba(255,184,0,0.12); color: #ffb800; border-color: rgba(255,184,0,0.3); }
+.ARP   { background: rgba(255,120,0,0.12); color: #ff8830; border-color: rgba(255,120,0,0.3); }
+.SSH   { background: rgba(255,59,59,0.15); color: #ff6060; border-color: rgba(255,59,59,0.4); }
+.ALERT { background: rgba(255,0,0,0.2);    color: #ff4444; border-color: rgba(255,0,0,0.5); animation: alert-flicker 0.8s infinite; }
+@keyframes alert-flicker { 0%,100%{opacity:1} 50%{opacity:0.6} }
+
+/* ── RIGHT PANEL (Stats + Alerts) ─────────────────────────────────────── */
+.side-panel {
+  grid-row: 3; grid-column: 2;
+  background: var(--bg1);
+  overflow-y: auto; display: flex; flex-direction: column;
+  scrollbar-width: thin; scrollbar-color: var(--line2) transparent;
+}
+
+.side-section {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 14px;
+}
+.side-title {
+  font-family: var(--mono); font-size: 9px; font-weight: 400;
+  letter-spacing: 2.5px; text-transform: uppercase;
+  color: var(--text2); margin-bottom: 10px;
+  display: flex; align-items: center; gap: 6px;
+}
+.side-title::before {
+  content: ''; width: 3px; height: 10px;
+  background: var(--acc); display: inline-block; border-radius: 1px;
+}
+
+/* Metric cards */
+.metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.metric-card {
+  background: var(--bg2); border: 1px solid var(--line);
+  border-radius: 2px; padding: 8px 10px;
+}
+.metric-label {
+  font-family: var(--mono); font-size: 8px; color: var(--text3);
+  letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 3px;
+}
+.metric-val {
+  font-family: var(--mono); font-size: 16px; color: var(--acc);
+  line-height: 1;
+}
+.metric-val.green { color: var(--green); }
+.metric-val.amber { color: var(--amber); }
+.metric-val.red   { color: var(--red); }
+
+/* Proto bars */
+.proto-bar-row {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 5px;
+}
+.proto-bar-label { font-family: var(--mono); font-size: 9px; color: var(--text2); width: 44px; }
+.proto-bar-track {
+  flex: 1; height: 5px; background: var(--bg3); border-radius: 1px; overflow: hidden;
+}
+.proto-bar-fill { height: 100%; border-radius: 1px; transition: width 0.4s; }
+.proto-bar-count { font-family: var(--mono); font-size: 9px; color: var(--text3); min-width: 28px; text-align: right; }
+
+/* Alerts feed */
+.alert-feed { display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow-y: auto; }
+.alert-item {
+  background: rgba(255,59,59,0.06); border: 1px solid rgba(255,59,59,0.2);
+  border-radius: 2px; padding: 6px 8px;
+  animation: slide-in 0.25s ease;
+}
+@keyframes slide-in { from{transform:translateX(8px);opacity:0} to{transform:none;opacity:1} }
+.alert-header { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.sev-badge {
+  font-family: var(--mono); font-size: 8px; letter-spacing: 1px;
+  padding: 1px 5px; border-radius: 1px; border: 1px solid;
+}
+.CRITICAL { color: #ff3b3b; border-color: rgba(255,59,59,0.5); background: rgba(255,59,59,0.15); }
+.HIGH     { color: #ff8830; border-color: rgba(255,136,48,0.5); background: rgba(255,136,48,0.12); }
+.MEDIUM   { color: #ffb800; border-color: rgba(255,184,0,0.4); background: rgba(255,184,0,0.1); }
+.LOW      { color: #aaaaaa; border-color: rgba(170,170,170,0.3); background: rgba(170,170,170,0.07); }
+.alert-type { font-family: var(--mono); font-size: 10px; color: var(--red); }
+.alert-src  { font-family: var(--mono); font-size: 9px; color: var(--text2); margin-top: 1px; }
+.alert-desc { font-family: var(--mono); font-size: 9px; color: var(--text3); margin-top: 2px; line-height: 1.4; }
+
+/* Top talkers */
+.talker-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.talker-ip { font-family: var(--mono); font-size: 10px; color: var(--text1); flex: 1; }
+.talker-bar-wrap { width: 60px; height: 4px; background: var(--bg3); border-radius: 1px; overflow: hidden; }
+.talker-bar { height: 100%; background: var(--acc2); border-radius: 1px; transition: width 0.4s; }
+.talker-count { font-family: var(--mono); font-size: 9px; color: var(--text3); min-width: 24px; text-align: right; }
+
+/* ── BOTTOM PANELS ───────────────────────────────────────────────────── */
+.bottom-row {
+  grid-row: 4; grid-column: 1 / -1;
+  display: grid; grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--line2);
+  overflow: hidden;
+}
+
+.detail-panel, .hex-panel {
+  background: var(--bg1); overflow: hidden;
+  padding: 10px 14px; display: flex; flex-direction: column;
+}
+.detail-panel { border-right: 1px solid var(--line); }
+
+.panel-title {
+  font-family: var(--mono); font-size: 9px; font-weight: 400;
+  letter-spacing: 2.5px; text-transform: uppercase; color: var(--text2);
+  margin-bottom: 8px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+}
+.panel-title::before {
+  content: ''; width: 3px; height: 10px;
+  background: var(--acc2); display: inline-block; border-radius: 1px;
+}
+
+.detail-tree {
+  font-family: var(--mono); font-size: 10px;
+  overflow-y: auto; flex: 1;
+  scrollbar-width: thin; scrollbar-color: var(--line2) transparent;
+}
+.tree-layer { color: var(--teal); cursor: pointer; }
+.tree-field { padding-left: 14px; border-left: 1px solid var(--line); margin-left: 6px; }
+.tree-key { color: var(--acc2); }
+.tree-val { color: var(--text1); }
+.tree-val.hi { color: var(--acc); }
+.tree-val.warn { color: var(--red); }
+.tree-val.green { color: var(--green); }
+.tree-row { line-height: 1.8; }
+
+.hex-wrap { font-family: var(--mono); font-size: 10px; overflow-y: auto; flex: 1;
+  scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+.hex-row { display: flex; gap: 10px; line-height: 1.8; }
+.hex-offset { color: var(--text3); width: 36px; flex-shrink: 0; }
+.hex-bytes  { color: var(--acc3); letter-spacing: 1px; flex: 1; }
+.hex-ascii  { color: var(--text3); }
+
+/* ── STATUS BAR ──────────────────────────────────────────────────────── */
+.statusbar {
+  grid-row: 5; grid-column: 1 / -1;
+  background: var(--bg1); border-top: 1px solid var(--line2);
+  display: flex; align-items: center;
+  padding: 0 16px; gap: 20px;
+  font-family: var(--mono); font-size: 9px; color: var(--text3);
+}
+.sb-item { display: flex; gap: 5px; align-items: center; }
+.sb-key { letter-spacing: 1px; text-transform: uppercase; }
+.sb-val { color: var(--text2); }
+.sb-val.green { color: var(--green2); }
+.sb-val.amber { color: var(--amber); }
+.sb-val.red   { color: var(--red); }
+.sb-right { margin-left: auto; display: flex; gap: 20px; align-items: center; }
+
+/* ── SCROLLBARS ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--acc3); border-radius: 2px; }
+
+/* ── EMPTY STATE ─────────────────────────────────────────────────────── */
+.empty-state {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px;
+  font-family: var(--mono); font-size: 10px; color: var(--text3);
+  letter-spacing: 1px;
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo-hex">
+      <svg viewBox="0 0 36 36" fill="none">
+        <polygon points="18,2 33,10 33,26 18,34 3,26 3,10" stroke="#00c8ff" stroke-width="1.2" fill="rgba(0,200,255,0.04)"/>
+        <polygon points="18,7 28,12.5 28,23.5 18,29 8,23.5 8,12.5" stroke="#0080cc" stroke-width="0.8" fill="none"/>
+        <circle cx="18" cy="18" r="3.5" fill="#00c8ff" opacity="0.9"/>
+        <line x1="18" y1="2"  x2="18" y2="34" stroke="#004f88" stroke-width="0.5"/>
+        <line x1="3"  y1="10" x2="33" y2="26" stroke="#004f88" stroke-width="0.5"/>
+        <line x1="3"  y1="26" x2="33" y2="10" stroke="#004f88" stroke-width="0.5"/>
+      </svg>
+    </div>
+    <div class="brand">
+      <div class="brand-name">NetSentinel</div>
+      <div class="brand-sub">Network Packet Analyzer &amp; IDS Engine · v3.0.0</div>
+    </div>
+
+    <div class="h-pills">
+      <div class="pill"><div class="dot dot-live" id="cap-dot"></div><span id="cap-label">CAPTURING</span></div>
+      <div class="pill">IFACE <b id="h-iface">eth0</b></div>
+      <div class="pill">PKTS <b id="h-pkts">0</b></div>
+      <div class="pill">RX <b id="h-rx">0 B/s</b></div>
+    </div>
+
+    <div class="h-right">
+      <div class="threat-badge" id="threat-badge">
+        <div class="dot dot-crit"></div>
+        <span id="threat-text">0 THREATS</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- TOOLBAR -->
+  <div class="toolbar">
+    <button class="tb-btn active" id="btn-cap" onclick="toggleCapture()">
+      <svg width="9" height="9" viewBox="0 0 9 9"><circle cx="4.5" cy="4.5" r="4" fill="#00ff88"/></svg>
+      <span id="btn-cap-label">STOP</span>
+    </button>
+    <button class="tb-btn" onclick="clearAll()">CLR</button>
+    <div class="tb-sep"></div>
+    <select class="tb-select" id="iface-sel" onchange="setIface(this.value)">
+      <option>eth0</option><option>eth1</option><option>wlan0</option>
+      <option>lo</option><option>any</option>
+    </select>
+    <div class="tb-sep"></div>
+    <div class="filter-wrap">
+      <div class="filter-label">BPF FILTER</div>
+      <input class="filter-input" id="filter-inp" placeholder="tcp and host 192.168.1.1" oninput="applyFilter()"/>
+    </div>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" onclick="scrollLock=!scrollLock; this.classList.toggle('active')">AUTO-SCROLL</button>
+    <button class="tb-btn" onclick="exportCapture()">EXPORT .PCAP</button>
+    <button class="tb-btn stop" onclick="injectAlert()">⚡ INJECT THREAT</button>
+  </div>
+
+  <!-- PACKET TABLE -->
+  <div class="pkt-panel">
+    <div class="pkt-table-wrap" id="pkt-wrap">
+      <table class="pkt">
+        <thead>
+          <tr>
+            <th class="col-no"   onclick="sortBy('no')">#</th>
+            <th class="col-time" onclick="sortBy('time')">TIME</th>
+            <th class="col-src"  onclick="sortBy('src')">SOURCE</th>
+            <th class="col-dst"  onclick="sortBy('dst')">DESTINATION</th>
+            <th class="col-proto">PROTO</th>
+            <th class="col-len" onclick="sortBy('len')">LEN</th>
+            <th class="col-info">INFO</th>
+          </tr>
+        </thead>
+        <tbody id="pkt-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <div class="side-panel">
+
+    <!-- Metrics -->
+    <div class="side-section">
+      <div class="side-title">Live Metrics</div>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Total Pkts</div>
+          <div class="metric-val" id="m-total">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Throughput</div>
+          <div class="metric-val green" id="m-rx">0 B/s</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Unique IPs</div>
+          <div class="metric-val" id="m-ips">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Threats</div>
+          <div class="metric-val red" id="m-threats">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Protocol Distribution -->
+    <div class="side-section">
+      <div class="side-title">Protocol Distribution</div>
+      <div id="proto-bars"></div>
+    </div>
+
+    <!-- Top Talkers -->
+    <div class="side-section">
+      <div class="side-title">Top Talkers</div>
+      <div id="top-talkers"><div class="empty-state">— no data yet —</div></div>
+    </div>
+
+    <!-- Alert Feed -->
+    <div class="side-section" style="flex:1;">
+      <div class="side-title">Threat Feed</div>
+      <div class="alert-feed" id="alert-feed">
+        <div class="empty-state">— awaiting traffic analysis —</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- BOTTOM: Detail + Hex -->
+  <div class="bottom-row">
+    <div class="detail-panel">
+      <div class="panel-title">Packet Dissection</div>
+      <div class="detail-tree" id="detail-tree">
+        <div class="empty-state">Select a packet to inspect layers</div>
+      </div>
+    </div>
+    <div class="hex-panel">
+      <div class="panel-title">Hex Dump · Payload View</div>
+      <div class="hex-wrap" id="hex-dump">
+        <div class="empty-state">Awaiting packet selection…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATUS BAR -->
+  <div class="statusbar">
+    <div class="sb-item"><span class="sb-key">TCP</span><span class="sb-val" id="sb-tcp">0</span></div>
+    <div class="sb-item"><span class="sb-key">UDP</span><span class="sb-val" id="sb-udp">0</span></div>
+    <div class="sb-item"><span class="sb-key">DNS</span><span class="sb-val" id="sb-dns">0</span></div>
+    <div class="sb-item"><span class="sb-key">HTTP</span><span class="sb-val" id="sb-http">0</span></div>
+    <div class="sb-item"><span class="sb-key">ICMP</span><span class="sb-val" id="sb-icmp">0</span></div>
+    <div class="sb-item"><span class="sb-key">DROPPED</span><span class="sb-val amber" id="sb-drop">0</span></div>
+    <div class="sb-right">
+      <div class="sb-item"><span class="sb-key">IFACE</span><span class="sb-val green" id="sb-iface">eth0</span></div>
+      <div class="sb-item"><span class="sb-key">UPTIME</span><span class="sb-val" id="sb-uptime">00:00:00</span></div>
+      <div class="sb-item"><span class="sb-key">ENGINE</span><span class="sb-val green">IDS ACTIVE</span></div>
+      <div class="sb-item"><span class="sb-key">MODE</span><span class="sb-val" id="sb-mode">SIMULATION</span></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────
+const POOL_SRC  = ['192.168.1.105','10.0.0.23','172.16.5.88','192.168.0.55','8.8.8.8','1.1.1.1','10.10.1.200','172.31.0.4','203.0.113.45','198.51.100.1'];
+const POOL_DST  = ['192.168.1.1','10.0.0.1','172.16.0.1','8.8.8.8','192.168.1.105','224.0.0.1','255.255.255.255','10.10.1.200','1.1.1.1','91.108.4.1'];
+const PROTOS    = ['TCP','TCP','TCP','TCP','UDP','UDP','HTTP','HTTPS','DNS','ICMP','ARP'];
+const INFOS = {
+  TCP:   p=>['[SYN] Seq='+ri(0,999999)+' Win=65535','[ACK] Seq='+ri(0,999999)+' Ack=1 Len=0','[PSH,ACK] Len=512','[FIN,ACK] Seq='+ri(0,999999),'[RST] Seq=0'],
+  HTTP:  p=>['GET /api/v2/data HTTP/1.1','POST /auth/login HTTP/1.1','HTTP/1.1 200 OK content-length='+ri(200,9999),'GET /static/bundle.js HTTP/1.1'],
+  HTTPS: p=>['TLSv1.3 Application Data len='+ri(100,1400),'Client Hello SNI=cdn.example.com','Server Hello Certificate','Change Cipher Spec Finished'],
+  DNS:   p=>['Std query A www.example'+ri(1,99)+'.com','Std query response 142.250.'+ri(1,200)+'.'+ri(1,200),'Std query AAAA api.service.io','Response: NXDOMAIN'],
+  UDP:   p=>['Src:'+ri(1024,65535)+' Dst:'+ri(1,65535)+' Len='+ri(8,512),'DHCP Discover XID=0x'+ri(0,65535).toString(16),'mDNS Query _http._tcp.local','SSDP M-SEARCH * HTTP/1.1'],
+  ICMP:  p=>['Echo (ping) request id='+ri(1,999)+' seq='+ri(1,100),'Echo (ping) reply id='+ri(1,999),'Dest unreachable (port)','TTL exceeded in transit'],
+  ARP:   p=>['Who has '+ri(1,254)+'.'+ri(1,254)+'.'+ri(1,254)+'.'+ri(1,254)+'? Tell '+p.src,'Reply '+p.dst+' is at '+genMac()],
+};
+
+let packets     = [];
+let filtered    = [];
+let filterText  = '';
+let selected    = null;
+let pktNo       = 0;
+let capturing   = true;
+let scrollLock  = true;
+let sortCol     = 'no';
+let sortDir     = -1;
+let alerts      = [];
+let stats       = {tcp:0,udp:0,http:0,https:0,dns:0,icmp:0,arp:0,other:0,threats:0,ips:new Set()};
+let startTime   = Date.now();
+let capInterval = null;
+let ws          = null;
+
+// ── IDS (client-side mirror) ───────────────────────────────────────────────
+const ids = {
+  syn:  {}, port: {}, icmp: {}, ssh: {},
+  check(p) {
+    const now = Date.now()/1000, src = p.src_ip, t = 0.001;
+    if(p.protocol==='TCP'&&p.flags&&p.flags.includes('S')&&!p.flags.includes('A')){
+      (this.syn[src]=this.syn[src]||[]).push(now);
+      this.syn[src]=this.syn[src].filter(x=>now-x<10);
+      if(this.syn[src].length>12) return {type:'SYN Flood',sev:'CRITICAL',desc:'SYN flood: high-rate SYN packets from '+src};
+    }
+    if((p.protocol==='TCP'||p.protocol==='UDP')&&p.dst_port){
+      if(!this.port[src]||now-this.port[src].ts>5){this.port[src]={ports:new Set(),ts:now};}
+      this.port[src].ports.add(p.dst_port);
+      if(this.port[src].ports.size>15){this.port[src].ports=new Set();return {type:'Port Scan',sev:'HIGH',desc:'Port scan: '+src+' probing multiple ports'};}
+    }
+    if(p.protocol==='ICMP'){
+      (this.icmp[src]=this.icmp[src]||[]).push(now);
+      this.icmp[src]=this.icmp[src].filter(x=>now-x<10);
+      if(this.icmp[src].length>25) return {type:'ICMP Flood',sev:'MEDIUM',desc:'ICMP flood from '+src};
+    }
+    if(p.dst_port===22){
+      (this.ssh[src]=this.ssh[src]||[]).push(now);
+      this.ssh[src]=this.ssh[src].filter(x=>now-x<30);
+      if(this.ssh[src].length>8) return {type:'SSH Brute Force',sev:'HIGH',desc:'Repeated SSH connections from '+src};
+    }
+    if(p.length>1400) return {type:'Oversized Frame',sev:'LOW',desc:'Abnormal frame size: '+p.length+' bytes'};
+    return null;
+  }
+};
+
+// ── HELPERS ────────────────────────────────────────────────────────────────
+function ri(a,b){return Math.floor(Math.random()*(b-a))+a;}
+function rc(a){return a[Math.floor(Math.random()*a.length)];}
+function genMac(){return Array.from({length:6},()=>ri(0,255).toString(16).padStart(2,'0')).join(':');}
+function fmtTime(){const n=new Date();return n.toTimeString().slice(0,8)+'.'+String(n.getMilliseconds()).padStart(3,'0');}
+function genHex(len){
+  const rows=[];
+  for(let i=0;i<Math.min(len,128);i+=16){
+    const c=Array.from({length:Math.min(16,Math.min(len,128)-i)},()=>ri(0,255));
+    rows.push({offset:i.toString(16).padStart(4,'0'),hex:c.map(b=>b.toString(16).padStart(2,'0')).join(' '),ascii:c.map(b=>(b>31&&b<127)?String.fromCharCode(b):'.').join('')});
+  }
+  return rows;
+}
+
+// ── PACKET GENERATOR ───────────────────────────────────────────────────────
+function genPacket(isAlert=false){
+  const proto = isAlert?'TCP':rc(PROTOS);
+  const src_ip = rc(POOL_SRC), dst_ip = rc(POOL_DST);
+  const src_port = ri(1024,65535);
+  const dst_map  = {HTTP:80,HTTPS:443,DNS:53,TCP:ri(1,65535),UDP:ri(1,65535)};
+  const dst_port = isAlert?22:dst_map[proto]||ri(1,65535);
+  const length   = ri(40,1460);
+  const ttl      = rc([64,128,255,32]);
+  const flags    = (proto==='TCP'||isAlert)?rc(['S','SA','A','PA','FA','R']):null;
+  const fakeP    = {src:src_ip,dst:dst_ip};
+  const infoArr  = INFOS[proto]?INFOS[proto](fakeP):['PACKET'];
+  const info     = isAlert?`[${flags}] SYN flood attempt on port ${dst_port}`:rc(infoArr);
+
+  return {
+    no:++pktNo, time_str:fmtTime(), timestamp:Date.now()/1000,
+    src_ip, dst_ip, src_port, dst_port,
+    protocol: isAlert?'ALERT':proto,
+    length, ttl, flags, info,
+    hex_dump: genHex(length),
+    alert: isAlert, alert_type: isAlert?'SYN Flood':'',
+    checksum: Math.random().toString(16).slice(2,18),
+  };
+}
+
+// ── RENDER ─────────────────────────────────────────────────────────────────
+function protoClass(p){ return p; }
+
+function renderTable(){
+  const tbody = document.getElementById('pkt-body');
+  const flt   = filterText.trim().toLowerCase();
+  filtered    = flt ? packets.filter(p=>
+    p.src_ip.includes(flt)||p.dst_ip.includes(flt)||
+    p.protocol.toLowerCase().includes(flt)||p.info.toLowerCase().includes(flt)||
+    String(p.length).includes(flt)||(p.src_port&&String(p.src_port).includes(flt))
+  ) : [...packets];
+
+  // sort
+  filtered.sort((a,b)=>{
+    const map={no:'no',time:'timestamp',src:'src_ip',dst:'dst_ip',len:'length'};
+    const k=map[sortCol]||'no';
+    return (a[k]<b[k]?-1:a[k]>b[k]?1:0)*sortDir;
+  });
+
+  const display = filtered.slice(-200);
+  tbody.innerHTML = display.map(p=>`
+    <tr class="${p.alert?'alert-row':''} ${selected===p.no?'selected':''}"
+        onclick="selectPkt(${p.no})">
+      <td class="col-no">${p.no}</td>
+      <td class="col-time">${p.time_str}</td>
+      <td class="col-src">${p.src_ip}${p.src_port?':'+p.src_port:''}</td>
+      <td class="col-dst">${p.dst_ip}${p.dst_port?':'+p.dst_port:''}</td>
+      <td class="col-proto"><span class="proto-badge ${p.protocol}">${p.protocol}</span></td>
+      <td class="col-len">${p.length}</td>
+      <td class="col-info" title="${p.info}">${p.info}</td>
+    </tr>`).join('');
+
+  if(scrollLock){
+    const w = document.getElementById('pkt-wrap');
+    w.scrollTop = w.scrollHeight;
+  }
+}
+
+function selectPkt(no){
+  selected = no;
+  const p  = packets.find(x=>x.no===no);
+  if(!p) return;
+
+  document.getElementById('detail-tree').innerHTML = `
+    <div class="tree-row"><span class="tree-layer">▾ Frame ${p.no}  [${p.length} bytes on wire]</span></div>
+    <div class="tree-field">
+      <div class="tree-row"><span class="tree-key">arrival_time:  </span><span class="tree-val hi">${p.time_str}</span></div>
+      <div class="tree-row"><span class="tree-key">frame_len:     </span><span class="tree-val">${p.length} bytes</span></div>
+      <div class="tree-row"><span class="tree-key">checksum:      </span><span class="tree-val">${p.checksum}</span></div>
+    </div>
+    <div class="tree-row" style="margin-top:4px"><span class="tree-layer">▾ Ethernet II</span></div>
+    <div class="tree-field">
+      <div class="tree-row"><span class="tree-key">src_mac:       </span><span class="tree-val">${genMac()}</span></div>
+      <div class="tree-row"><span class="tree-key">dst_mac:       </span><span class="tree-val">${genMac()}</span></div>
+      <div class="tree-row"><span class="tree-key">ethertype:     </span><span class="tree-val hi">0x0800 (IPv4)</span></div>
+    </div>
+    <div class="tree-row" style="margin-top:4px"><span class="tree-layer">▾ Internet Protocol v4</span></div>
+    <div class="tree-field">
+      <div class="tree-row"><span class="tree-key">src_addr:      </span><span class="tree-val hi">${p.src_ip}</span></div>
+      <div class="tree-row"><span class="tree-key">dst_addr:      </span><span class="tree-val hi">${p.dst_ip}</span></div>
+      <div class="tree-row"><span class="tree-key">ttl:           </span><span class="tree-val">${p.ttl}</span></div>
+      <div class="tree-row"><span class="tree-key">protocol:      </span><span class="tree-val">${p.protocol} (${p.protocol==='TCP'||p.protocol==='ALERT'?6:p.protocol==='UDP'?17:1})</span></div>
+      <div class="tree-row"><span class="tree-key">header_len:    </span><span class="tree-val">20 bytes</span></div>
+    </div>
+    ${p.src_port?`
+    <div class="tree-row" style="margin-top:4px"><span class="tree-layer">▾ ${p.protocol} ${p.protocol==='TCP'||p.protocol==='ALERT'?'Segment':'Datagram'}</span></div>
+    <div class="tree-field">
+      <div class="tree-row"><span class="tree-key">src_port:      </span><span class="tree-val">${p.src_port}</span></div>
+      <div class="tree-row"><span class="tree-key">dst_port:      </span><span class="tree-val">${p.dst_port}</span></div>
+      ${p.flags?`<div class="tree-row"><span class="tree-key">flags:         </span><span class="tree-val ${p.alert?'warn':'green'}">${p.flags} (${p.alert?'⚠ SUSPICIOUS':'OK'})</span></div>`:''}
+      <div class="tree-row"><span class="tree-key">window_size:   </span><span class="tree-val">${ri(512,65535)}</span></div>
+      <div class="tree-row"><span class="tree-key">seq_num:       </span><span class="tree-val">${ri(0,4294967295)}</span></div>
+    </div>`:''}
+    <div class="tree-row" style="margin-top:4px"><span class="tree-layer">▾ Data</span></div>
+    <div class="tree-field">
+      <div class="tree-row"><span class="tree-key">payload_len:   </span><span class="tree-val">${Math.max(0,p.length-40)} bytes</span></div>
+    </div>
+    <div class="tree-row" style="margin-top:4px"><span class="tree-key">info: </span><span class="tree-val">${p.info}</span></div>
+  `;
+
+  document.getElementById('hex-dump').innerHTML = p.hex_dump.map(r=>`
+    <div class="hex-row">
+      <span class="hex-offset">${r.offset}</span>
+      <span class="hex-bytes">${r.hex.padEnd(47,' ')}</span>
+      <span class="hex-ascii">${r.ascii}</span>
+    </div>`).join('');
+
+  renderTable();
+}
+
+// ── STATS ──────────────────────────────────────────────────────────────────
+function updateStats(){
+  document.getElementById('h-pkts').textContent    = packets.length;
+  document.getElementById('m-total').textContent   = packets.length;
+  document.getElementById('m-threats').textContent = stats.threats;
+  document.getElementById('m-ips').textContent     = stats.ips.size;
+  document.getElementById('sb-tcp').textContent    = stats.tcp;
+  document.getElementById('sb-udp').textContent    = stats.udp;
+  document.getElementById('sb-dns').textContent    = stats.dns;
+  document.getElementById('sb-http').textContent   = stats.http;
+  document.getElementById('sb-icmp').textContent   = stats.icmp;
+  document.getElementById('sb-drop').textContent   = Math.floor(packets.length*0.002);
+
+  const up = Math.floor((Date.now()-startTime)/1000);
+  document.getElementById('sb-uptime').textContent =
+    [Math.floor(up/3600),Math.floor(up%3600/60),up%60].map(n=>String(n).padStart(2,'0')).join(':');
+
+  // Proto bars
+  const total = packets.length||1;
+  const rows  = [
+    {k:'TCP',c:stats.tcp,  col:'#4ab4f0'},
+    {k:'UDP',c:stats.udp,  col:'#30e070'},
+    {k:'HTTP',c:stats.http,col:'#00d4aa'},
+    {k:'HTTPS',c:stats.https,col:'#00cc60'},
+    {k:'DNS', c:stats.dns, col:'#aa80ff'},
+    {k:'ICMP',c:stats.icmp,col:'#ffb800'},
+    {k:'ARP', c:stats.arp, col:'#ff8830'},
+  ];
+  document.getElementById('proto-bars').innerHTML = rows.map(r=>`
+    <div class="proto-bar-row">
+      <span class="proto-bar-label">${r.k}</span>
+      <div class="proto-bar-track"><div class="proto-bar-fill" style="width:${Math.min(100,(r.c/total)*100*4)}%;background:${r.col}"></div></div>
+      <span class="proto-bar-count">${r.c}</span>
+    </div>`).join('');
+
+  // Top talkers
+  const sorted = Object.entries(stats.ipCount||{}).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const maxT   = sorted[0]?.[1]||1;
+  document.getElementById('top-talkers').innerHTML = sorted.length ? sorted.map(([ip,cnt])=>`
+    <div class="talker-row">
+      <span class="talker-ip">${ip}</span>
+      <div class="talker-bar-wrap"><div class="talker-bar" style="width:${(cnt/maxT)*100}%"></div></div>
+      <span class="talker-count">${cnt}</span>
+    </div>`).join('') : '<div class="empty-state">— no data yet —</div>';
+}
+
+// ── PACKET LOOP ────────────────────────────────────────────────────────────
+function processPacket(p){
+  packets.push(p);
+  if(packets.length>2000) packets.shift();
+
+  stats.ips.add(p.src_ip);
+  if(!stats.ipCount) stats.ipCount={};
+  stats.ipCount[p.src_ip] = (stats.ipCount[p.src_ip]||0)+1;
+
+  const pm = {TCP:'tcp',UDP:'udp',HTTP:'http',HTTPS:'https',DNS:'dns',ICMP:'icmp',ARP:'arp'};
+  const k  = pm[p.protocol]||'other';
+  stats[k]=(stats[k]||0)+1;
+
+  if(!p.alert){
+    const threat = ids.check(p);
+    if(threat){ p.alert=true; p.alert_type=threat.type; addAlert(threat,p); stats.threats++; }
+  } else {
+    addAlert({type:p.alert_type||'ALERT',sev:'CRITICAL',desc:p.info},p);
+    stats.threats++;
+  }
+
+  document.getElementById('h-pkts').textContent = packets.length;
+}
+
+function addAlert(threat, p){
+  const feed = document.getElementById('alert-feed');
+  if(feed.querySelector('.empty-state')) feed.innerHTML='';
+
+  const el = document.createElement('div');
+  el.className='alert-item';
+  el.innerHTML=`
+    <div class="alert-header">
+      <span class="sev-badge ${threat.sev}">${threat.sev}</span>
+      <span class="alert-type">${threat.type}</span>
+    </div>
+    <div class="alert-src">${p.src_ip}${p.src_port?':'+p.src_port:''} → ${p.dst_ip}${p.dst_port?':'+p.dst_port:''}</div>
+    <div class="alert-desc">${threat.desc}</div>`;
+  feed.prepend(el);
+  while(feed.children.length>20) feed.removeChild(feed.lastChild);
+
+  const badge = document.getElementById('threat-badge');
+  badge.classList.add('visible');
+  document.getElementById('threat-text').textContent = stats.threats+' THREATS';
+  document.getElementById('m-threats').textContent   = stats.threats;
+}
+
+// ── CAPTURE LOOP ───────────────────────────────────────────────────────────
+function startLoop(){
+  let batch=0;
+  capInterval = setInterval(()=>{
+    if(!capturing) return;
+    const count = Math.random()<0.25?3:Math.random()<0.5?2:1;
+    for(let i=0;i<count;i++) processPacket(genPacket());
+    if(++batch%3===0){ renderTable(); updateStats(); }
+    // Fake throughput
+    const rx = (Math.random()*2.4+0.1).toFixed(2);
+    document.getElementById('h-rx').textContent   = rx+' MB/s';
+    document.getElementById('m-rx').textContent   = rx+' MB/s';
+  }, 220);
+}
+
+// ── CONTROLS ──────────────────────────────────────────────────────────────
+function toggleCapture(){
+  capturing = !capturing;
+  const btn = document.getElementById('btn-cap');
+  const dot = document.getElementById('cap-dot');
+  const lbl = document.getElementById('cap-label');
+  if(capturing){
+    btn.classList.add('active'); btn.classList.remove('stop');
+    document.getElementById('btn-cap-label').textContent='STOP';
+    dot.className='dot dot-live'; lbl.textContent='CAPTURING';
+  } else {
+    btn.classList.remove('active'); btn.classList.add('stop');
+    document.getElementById('btn-cap-label').textContent='START';
+    dot.className='dot dot-off'; lbl.textContent='STOPPED';
+  }
+}
+
+function clearAll(){
+  packets=[]; filtered=[]; pktNo=0; selected=null;
+  Object.assign(stats,{tcp:0,udp:0,http:0,https:0,dns:0,icmp:0,arp:0,other:0,threats:0,ips:new Set(),ipCount:{}});
+  document.getElementById('pkt-body').innerHTML='';
+  document.getElementById('detail-tree').innerHTML='<div class="empty-state">Select a packet to inspect layers</div>';
+  document.getElementById('hex-dump').innerHTML='<div class="empty-state">Awaiting packet selection…</div>';
+  document.getElementById('alert-feed').innerHTML='<div class="empty-state">— awaiting traffic analysis —</div>';
+  document.getElementById('threat-badge').classList.remove('visible');
+  updateStats();
+}
+
+function applyFilter(){
+  filterText=document.getElementById('filter-inp').value;
+  renderTable();
+}
+
+function sortBy(col){
+  if(sortCol===col) sortDir*=-1; else { sortCol=col; sortDir=-1; }
+  renderTable();
+}
+
+function setIface(v){
+  document.getElementById('h-iface').textContent=v;
+  document.getElementById('sb-iface').textContent=v;
+}
+
+function injectAlert(){
+  const p = genPacket(true);
+  p.protocol='ALERT';
+  processPacket(p);
+  renderTable(); updateStats();
+}
+
+function exportCapture(){
+  const lines = packets.map(p=>`${p.time_str}\t${p.src_ip}:${p.src_port||''}\t${p.dst_ip}:${p.dst_port||''}\t${p.protocol}\t${p.length}\t${p.info}`);
+  const blob  = new Blob(['Time\tSource\tDestination\tProtocol\tLength\tInfo\n'+lines.join('\n')], {type:'text/plain'});
+  const a     = document.createElement('a');
+  a.href      = URL.createObjectURL(blob);
+  a.download  = 'capture_'+Date.now()+'.pcap.txt';
+  a.click();
+}
+
+// ── WS (production mode) ──────────────────────────────────────────────────
+function tryConnectWS(){
+  try {
+    ws = new WebSocket('ws://localhost:8765/ws');
+    ws.onopen  = ()=>{ document.getElementById('sb-mode').textContent='LIVE'; };
+    ws.onmessage = e=>{
+      const msg = JSON.parse(e.data);
+      if(msg.type==='packet'){ processPacket(msg.data); renderTable(); updateStats(); }
+    };
+    ws.onerror = ()=>{}; ws.onclose = ()=>{};
+  } catch(e){}
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────
+startLoop();
+tryConnectWS();
+</script>
+</body>
+</html>
